@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>BTC Bot — {{ symbol }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background:#fafafa; }
+    .row { display: flex; gap: 24px; flex-wrap: wrap; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; min-width: 280px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); background: #fff; }
+    .btn { padding: 8px 14px; border: 1px solid #444; border-radius: 8px; cursor: pointer; background: #fafafa; }
+    .btn:hover { background: #f0f0f0; }
+    .btn[disabled] { opacity: .5; cursor: not-allowed; }
+    table { border-collapse: collapse; width: 100%; background:#fff; }
+    th, td { border: 1px solid #e6e6e6; padding: 6px 8px; text-align: left; font-size: 13px;}
+    th { background: #f8f8f8; }
+    .ok { color: #0a7a0a; }
+    .err { color: #b00000; }
+    .muted { color:#666; font-size:12px; }
+    .pos { color:#0a7a0a; font-weight:600; }
+    .neg { color:#b00000; font-weight:600; }
+    h2, h3 { margin: 0 0 8px 0; }
+    a.btn { text-decoration: none; display:inline-block; }
+    .grid-2 { display:grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap:16px; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #ddd; background:#fafafa; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:12px; background:#f6f6f6; border:1px solid #ddd; }
+    .banner { border:1px solid #f0c4c4; background:#fff6f6; color:#821e1e; padding:10px 12px; border-radius:10px; margin-bottom:16px; }
+    .banner strong { color:#b00000; }
+  </style>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+  <h2>BTC Bot — {{ symbol }}</h2>
+
+  <div id="failsafe_banner" class="banner" style="display:none;">
+    <strong>Failsafe: Triggered.</strong>
+    Trading stopped due to a drawdown limit breach.
+    <span id="failsafe_details" class="muted"></span>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <div><strong>Status:</strong> <span id="running">…</span></div>
+      <div><strong>Failsafe:</strong> <span id="failsafe_status" class="badge">—</span></div>
+      <div class="muted" id="failsafe_meta">—</div>
+
+      <div style="margin-top:8px;">
+        <button class="btn" onclick="resetFailsafe()">Reset Failsafe (baseline = current)</button>
+      </div>
+
+      <div style="margin-top:8px;"><strong>Regime:</strong> <span id="regime">…</span></div>
+      <div><strong>Last signal:</strong> <span id="signal">…</span></div>
+      <div><strong>Last action:</strong> <span id="action">…</span></div>
+      <div><strong>Position qty:</strong> <span id="qty">…</span></div>
+
+      <div style="margin-top:8px;">
+        <strong>Account equity:</strong>
+        $<span id="acct_equity">…</span>
+        <span id="acct_equity_delta" class="muted">—</span>
+      </div>
+      <div class="muted">Cash: $<span id="acct_cash">…</span> • BP: $<span id="acct_bp">…</span></div>
+      <div class="muted">Acct as of: <span id="acct_at">—</span></div>
+
+      <div style="margin-top:8px;"><strong>Updated:</strong> <span id="updated">…</span></div>
+      <div><strong>Error:</strong> <span id="error" class="ok">—</span></div>
+
+      <div style="margin-top:8px;">
+        <strong>LLM:</strong> <span id="llm_enabled">—</span>
+        <span class="muted">(<span id="llm_model">—</span>)</span>
+      </div>
+      <div><strong>Decider:</strong> <span id="llm_mode">—</span></div>
+      <div class="muted" id="llm_last" style="margin-top:4px;">—</div>
+
+      <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn" id="btn_rules" onclick="setDecider('rules')">Use Rules</button>
+        <button class="btn" id="btn_llm"   onclick="setDecider('llm')">Use LLM</button>
+      </div>
+
+      <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn" onclick="startBot()">Start</button>
+        <button class="btn" onclick="stopBot()">Stop</button>
+        <button class="btn" onclick="sendEOD()">Send EOD Email</button>
+      </div>
+
+      <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="btn" href="/download/trades.csv">Download Trades CSV</a>
+        <a class="btn" href="/download/errors.csv">Download Errors CSV</a>
+      </div>
+
+      <div class="muted" style="margin-top:12px;">
+        <div><strong>Next EOD send:</strong> <span id="eod_next_at">—</span></div>
+        <div>
+          <strong>Sent today:</strong>
+          <span id="eod_sent_today" class="badge">—</span>
+        </div>
+      </div>
+
+      <div class="muted" style="margin-top:8px;">Times shown in {{ local_tz }}.</div>
+    </div>
+
+    <div class="card" style="flex: 1; min-width: 460px;">
+      <h3>Live Equity & Price</h3>
+      <div id="equity_chart" style="height:300px;"></div>
+    </div>
+  </div>
+
+  <!-- ✅ Decision Inputs restored -->
+  <div class="card" style="margin-top:24px;">
+    <h3 style="margin:0 0 8px 0;">Decision Inputs (Last Closed 1h Bar)</h3>
+    <div class="muted" id="ind_bar_time">—</div>
+
+    <div style="margin:8px 0 14px 0;">
+      <strong>Price:</strong>
+      <span id="ind_price_top" class="pill">—</span>
+      <span class="muted"> • Regime:</span>
+      <span id="ind_regime_top" class="pill">—</span>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <div style="margin-bottom:6px;"><strong>EMA 250 vs 500</strong></div>
+        <div>prev: <span id="ind_ema_prev_pair">—</span></div>
+        <div>curr: <span id="ind_ema_curr_pair">—</span></div>
+        <div style="margin-top:6px;">
+          <span class="muted">Spread (curr) Δ(250−500):</span>
+          <span id="ind_ema_spread" class="pill">—</span>
+        </div>
+        <div style="margin-top:6px;">
+          <span class="muted">Cross:</span>
+          <span>up=<span id="ind_ema_up" class="pill">—</span></span>
+          <span style="margin-left:6px;">down=<span id="ind_ema_dn" class="pill">—</span></span>
+        </div>
+      </div>
+
+      <div>
+        <div style="margin-bottom:6px;"><strong>CCI(20) vs CCI_MA(20)</strong></div>
+        <div>prev: <span id="ind_cci_prev_pair">—</span></div>
+        <div>curr: <span id="ind_cci_curr_pair">—</span></div>
+        <div style="margin-top:6px;">
+          <span class="muted">Diff (curr) CCI−CCI_MA:</span>
+          <span id="ind_cci_diff" class="pill">—</span>
+        </div>
+        <div style="margin-top:6px;">
+          <span class="muted">Cross:</span>
+          <span>up=<span id="ind_cci_up" class="pill">—</span></span>
+          <span style="margin-left:6px;">down=<span id="ind_cci_dn" class="pill">—</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:24px;">
+    <h3>Trades (round-trip)</h3>
+    <table id="trades_tbl">
+      <thead>
+        <tr>
+          <th>EntryTime</th>
+          <th>EntryPrice</th>
+          <th>ExitTime</th>
+          <th>ExitPrice</th>
+          <th>Qty</th>
+          <th>EntryValue</th>
+          <th>ExitValue</th>
+          <th>PnL_Realized</th>
+          <th>EntrySignal</th>
+          <th>ExitSignal</th>
+          <th>Note</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+<script>
+async function fetchJSON(url){
+  const r = await fetch(url, { cache: 'no-store' });
+  const t = await r.text();
+  try { return { ok: r.ok, json: JSON.parse(t) }; }
+  catch { return { ok: r.ok, json: { raw: t } }; }
+}
+
+async function setDecider(mode){
+  try{
+    const r = await fetch(`/config/decider?mode=${encodeURIComponent(mode)}`, { method: 'POST' });
+    const j = await r.json();
+    if(!r.ok){ alert(`Switch failed: ${j.error || r.status}`); return; }
+    await refresh();
+    alert(`Trade decider set to: ${j.mode?.toUpperCase?.() || mode.toUpperCase()}`);
+  }catch(e){ console.error(e); alert('Error switching decider (check server logs)'); }
+}
+
+async function resetFailsafe(){
+  try{
+    const r = await fetch('/failsafe/reset', { method: 'POST' });
+    const j = await r.json();
+    if(!r.ok){ alert(`Reset failed: ${j.error || r.status}`); return; }
+    alert(`Failsafe reset. New baseline = $${Number(j.baseline||0).toFixed(2)}.\n(Click Start to resume trading.)`);
+    await refresh();
+  }catch(e){
+    console.error(e); alert('Reset error (check server logs)');
+  }
+}
+
+function setEquityColorAndDelta(todayStart, latest){
+  const eqEl = document.getElementById('acct_equity');
+  const deltaEl = document.getElementById('acct_equity_delta');
+  eqEl.classList.remove('pos','neg'); deltaEl.classList.remove('pos','neg');
+  if (todayStart == null || latest == null || isNaN(todayStart) || isNaN(latest)) { deltaEl.textContent = '—'; return; }
+  const diff = latest - todayStart; const pct = todayStart !== 0 ? (diff / todayStart) * 100 : 0;
+  const sign = diff > 0 ? '+' : diff < 0 ? '−' : ''; const cls = diff > 0 ? 'pos' : diff < 0 ? 'neg' : '';
+  if (cls) { eqEl.classList.add(cls); deltaEl.classList.add(cls); }
+  deltaEl.textContent = `(${sign}${Math.abs(diff).toFixed(2)} | ${sign}${Math.abs(pct).toFixed(2)}%)`;
+}
+
+function setEodBadge(sent){
+  const el = document.getElementById('eod_sent_today');
+  el.textContent = sent ? 'Yes' : 'No';
+  el.style.background = sent ? '#e7f6ec' : '#fff6f6';
+  el.style.borderColor = sent ? '#bfe3cc' : '#f0c4c4';
+  el.style.color = sent ? '#0a7a0a' : '#b00000';
+}
+
+function formatLocalIso(iso){
+  try{
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }catch{ return iso; }
+}
+
+function showFailsafe(fs){
+  const badge = document.getElementById('failsafe_status');
+  const banner = document.getElementById('failsafe_banner');
+  const details = document.getElementById('failsafe_details');
+  const meta = document.getElementById('failsafe_meta');
+  if (!fs || fs.enabled === false){
+    badge.textContent = 'Off';
+    badge.style.background = '#f6f6f6';
+    banner.style.display = 'none';
+    meta.textContent = 'Failsafe disabled';
+    return;
+  }
+  const threshold = (fs.threshold_pct*100).toFixed(0);
+  meta.textContent = `Baseline $${(fs.baseline_equity||0).toFixed(2)} • Threshold ${threshold}% • Current $${(fs.equity_now||0).toFixed(2)}`;
+  if (fs.triggered){
+    badge.textContent = 'Triggered';
+    badge.style.background = '#fff0f0';
+    badge.style.borderColor = '#f0c4c4';
+    badge.style.color = '#b00000';
+    banner.style.display = 'block';
+    const dd = (fs.drawdown_pct*100).toFixed(2);
+    details.textContent = ` — Drawdown ${dd}% ≥ ${threshold}%, baseline $${(fs.baseline_equity||0).toFixed(2)}, current $${(fs.equity_now||0).toFixed(2)} (at ${fs.triggered_at || '—'}).`;
+  } else {
+    badge.textContent = `On (${threshold}% limit)`;
+    badge.style.background = '#e7f6ec';
+    badge.style.borderColor = '#bfe3cc';
+    badge.style.color = '#0a7a0a';
+    banner.style.display = 'none';
+  }
+}
+
+async function refresh(){
+  try{
+    const sResp = await fetchJSON('/status?ts=' + Date.now()); const s = sResp.json || {};
+    document.getElementById('running').textContent = s.running ? 'RUNNING' : 'STOPPED';
+    document.getElementById('regime').textContent = s.regime || '—';
+    document.getElementById('signal').textContent = s.last_signal || '—';
+    document.getElementById('action').textContent = s.last_action || '—';
+    document.getElementById('qty').textContent = Number(s.position_qty || 0).toFixed(6);
+    document.getElementById('updated').textContent = s.updated_at || '—';
+
+    const err = document.getElementById('error');
+    if (s.last_error){ err.textContent = s.last_error; err.className = 'err'; }
+    else { err.textContent = '—'; err.className = 'ok'; }
+
+    // Failsafe UI
+    showFailsafe(s.failsafe);
+
+    // LLM status & buttons + rationale
+    const llm = (s && s.llm) ? s.llm : {};
+    document.getElementById('llm_enabled').textContent = llm.enabled ? 'ON' : 'OFF';
+    document.getElementById('llm_model').textContent   = llm.model || '—';
+    document.getElementById('llm_mode').textContent    = llm.mode || 'rules';
+    document.getElementById('llm_last').textContent    = llm.last_text ? `LLM: ${llm.last_text}` : '—';
+    const mode = (llm.mode || 'rules').toLowerCase();
+    document.getElementById('btn_rules').disabled = (mode === 'rules');
+    document.getElementById('btn_llm').disabled   = (mode === 'llm');
+
+    // Account
+    const acct = (s && s.account) ? s.account : {};
+    const fmtMoney = (v) => (v == null || isNaN(+v)) ? '—' : (+v).toFixed(2);
+    const equityNow = (acct && typeof acct.equity === 'number') ? +acct.equity : null;
+    document.getElementById('acct_equity').textContent = fmtMoney(acct.equity);
+    document.getElementById('acct_cash').textContent   = fmtMoney(acct.cash);
+    document.getElementById('acct_bp').textContent     = fmtMoney(acct.buying_power);
+    document.getElementById('acct_at').textContent     = s.account_at || '—';
+
+    // EOD meta
+    if (document.getElementById('eod_next_at')) {
+      document.getElementById('eod_next_at').textContent = s.eod_next_at ? formatLocalIso(s.eod_next_at) : '—';
+      document.getElementById('eod_sent_today').textContent = s.eod_sent_today ? 'Yes' : 'No';
+    }
+
+    // Equity chart
+    const eqResp = await fetchJSON('/equity.json?ts=' + Date.now());
+    let todayStartEquity = null;
+    if (eqResp.ok){
+      const eq = Array.isArray(eqResp.json) ? eqResp.json : [];
+      const xs = eq.map(d => d.timestamp), ys = eq.map(d => +d.equity), ps = eq.map(d => +d.price);
+      const layout = { margin:{l:50,r:20,t:10,b:30}, xaxis:{showgrid:false}, yaxis:{title:'Equity ($)'}, legend:{orientation:'h', x:0, y:1.15} };
+      const data = [
+        { x: xs, y: ys, mode:'lines', name:'Equity', hovertemplate:'$%{y:.2f}<extra>Equity</extra>' },
+        { x: xs, y: ps, mode:'lines', name:'BTC Price', hovertemplate:'$%{y:.2f}<extra>BTC Price</extra>' }
+      ];
+      Plotly.react('equity_chart', data, layout);
+      const isSameLocalDay = (iso) => { const d = new Date(iso), n = new Date(); return d.getFullYear()===n.getFullYear() && d.getMonth()===n.getMonth() && d.getDate()===n.getDate(); };
+      for (let i=0;i<eq.length;i++){ const row = eq[i]; if (isSameLocalDay(row.timestamp)){ todayStartEquity = +row.equity; break; } }
+    }
+    setEquityColorAndDelta(todayStartEquity, equityNow);
+
+    // ✅ Decision Inputs (populate)
+    const ind = (s && s.indicators) ? s.indicators : {};
+    const fmt = (v, d=2) => (v == null || isNaN(+v)) ? '—' : (+v).toFixed(d);
+    const yn  = (b) => (b ? 'true' : 'false');
+    document.getElementById('ind_bar_time').textContent = `Last bar: ${ind.last_bar_time || '—'}`;
+    document.getElementById('ind_price_top').textContent = fmt(ind.price, 2);
+    document.getElementById('ind_regime_top').textContent = s.regime || '—';
+    document.getElementById('ind_ema_prev_pair').textContent = (isFinite(+ind.ema250_prev)&&isFinite(+ind.ema500_prev)) ? `${fmt(ind.ema250_prev,3)} vs ${fmt(ind.ema500_prev,3)}` : '—';
+    document.getElementById('ind_ema_curr_pair').textContent = (isFinite(+ind.ema250_curr)&&isFinite(+ind.ema500_curr)) ? `${fmt(ind.ema250_curr,3)} vs ${fmt(ind.ema500_curr,3)}` : '—';
+    document.getElementById('ind_ema_spread').textContent    = fmt(ind.ema_spread_curr,3);
+    document.getElementById('ind_ema_up').textContent        = yn(ind.ema_cross_up);
+    document.getElementById('ind_ema_dn').textContent        = yn(ind.ema_cross_down);
+    document.getElementById('ind_cci_prev_pair').textContent = (isFinite(+ind.cci_prev)&&isFinite(+ind.cci_sma_prev)) ? `${fmt(ind.cci_prev,2)} vs ${fmt(ind.cci_sma_prev,2)}` : '—';
+    document.getElementById('ind_cci_curr_pair').textContent = (isFinite(+ind.cci_curr)&&isFinite(+ind.cci_sma_curr)) ? `${fmt(ind.cci_curr,2)} vs ${fmt(ind.cci_sma_curr,2)}` : '—';
+    document.getElementById('ind_cci_diff').textContent      = fmt(ind.cci_diff_curr,2);
+    document.getElementById('ind_cci_up').textContent        = yn(ind.cci_cross_up);
+    document.getElementById('ind_cci_dn').textContent        = yn(ind.cci_cross_down);
+
+    // Trades table
+    const tRaw = await fetch('/trades.json?ts=' + Date.now(), { cache: 'no-store' });
+    let trades = [];
+    try { trades = JSON.parse(await tRaw.text()); } catch {}
+    const tb = document.querySelector('#trades_tbl tbody'); tb.innerHTML = '';
+    if (!Array.isArray(trades) || trades.length === 0) {
+      const trEl = document.createElement('tr'); trEl.innerHTML = `<td colspan="11" class="muted">No round-trip trades yet</td>`; tb.appendChild(trEl);
+    } else {
+      trades.slice().reverse().forEach(tr => {
+        const num = (v, d=2) => (v==null || isNaN(+v)) ? '—' : (+v).toFixed(d);
+        const trEl = document.createElement('tr');
+        trEl.innerHTML = `
+          <td>${tr.EntryTime || ''}</td>
+          <td>${num(tr.EntryPrice,2)}</td>
+          <td>${tr.ExitTime || ''}</td>
+          <td>${num(tr.ExitPrice,2)}</td>
+          <td>${num(tr.Qty,6)}</td>
+          <td>${num(tr.EntryValue,2)}</td>
+          <td>${num(tr.ExitValue,2)}</td>
+          <td>${num(tr.PnL_Realized,2)}</td>
+          <td>${tr.EntrySignal || ''}</td>
+          <td>${tr.ExitSignal || ''}</td>
+          <td>${tr.Note || ''}</td>
+        `;
+        tb.appendChild(trEl);
+      });
+    }
+  }catch(e){ console.error('[refresh]', e); }
+}
+
+async function startBot(){ try{ await fetch('/start'); await refresh(); }catch(e){ console.error(e); } }
+async function stopBot(){ try{ await fetch('/stop'); await refresh(); }catch(e){ console.error(e); } }
+async function sendEOD(){ try{ const r = await fetch('/debug/send-eod?force=1'); const t = await r.text(); alert(t); await refresh(); }catch(e){ alert('EOD error'); } }
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
