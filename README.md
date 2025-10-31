@@ -79,6 +79,7 @@ This trading application leverages the Alpaca API to support both paper and live
 -   Realtime charting of account equity and BTCUSD price
 -   Logging of all trades and errors
 -   Daily and on-demand gmail report of P/L, open and closed trades
+-   Failsafe to stop trading if account drops 25% below last realized equity value.
 <img width="1889" height="899" alt="image" src="https://github.com/user-attachments/assets/a63388b2-4269-4725-91f4-12a51b9cf830" />
 
 ### Known issues
