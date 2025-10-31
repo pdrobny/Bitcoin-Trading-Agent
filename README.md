@@ -77,7 +77,7 @@ This trading application leverages the Alpaca API to support both paper and live
 -   LLM based action explanation
 -   Toggle to switch between strict rules based strategy or LLM prompt based strategy
 -   Realtime charting of account equity and BTCUSD price
--   Logging of all trades and errors
+-   Logging of all trades and errors available on-demand and by daily gmail report.
 -   Daily and on-demand gmail report of P/L, open and closed trades
 -   Failsafe to stop trading if account drops 25% below last realized equity value.
 <img width="1889" height="899" alt="image" src="https://github.com/user-attachments/assets/a63388b2-4269-4725-91f4-12a51b9cf830" />
