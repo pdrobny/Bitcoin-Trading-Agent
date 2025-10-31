@@ -65,6 +65,9 @@ App Glossary:
  CCI_MA:  The moving average of CCI.
  
 ### Backtesting
+A python script, backtest.py, was used to simulate trading for the past 2 year period using the dynamic strategy defined above and compared to buying and holding BTC for the same time period.  Past BTC prices were access via Coinbase API.  With an initial investment of $10,000 USD holding BTC for 2 years resulted in a final equity of $32,300 USD, a 223% gain.  With the same $10,000 USD invest the dynamic strategy resulted in a final equity of $47,400, a 374% gain.  Backtesting shows the hybrid strategy outperforms buy and holding BTC by 67% over the past two year period.
+<img width="1887" height="929" alt="image" src="https://github.com/user-attachments/assets/bad13a2d-9b2f-4b2a-9f15-84e9769007c2" />
+
 
 ## Application Features
 
